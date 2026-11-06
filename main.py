@@ -1,98 +1,148 @@
 import requests
-import bcrypt
-import re
+import hashlib
 
 class Usuario:
-    def __init__(self, id_usuario, correo, password_plana):
+    def __init__(self, id_usuario, correo, password):
         self.__id_usuario = id_usuario
         self.__correo = correo
-        # Cifrado de contraseña al instanciar el objeto (3.1.2.I.5)
-        self.__password_hash = self.__generar_hash(password_plana)
+        self.__password_hash = hashlib.sha256(password.encode()).hexdigest()
 
-    def __generar_hash(self, password):
-        """Genera un hash seguro utilizando bcrypt."""
-        salt = bcrypt.gensalt()
-        return bcrypt.hashpw(password.encode('utf-8'), salt)
-
-    def login(self, correo_intento, password_intento):
-        """Valida las credenciales cifradas."""
-        if self.__correo == correo_intento:
-            if bcrypt.checkpw(password_intento.encode('utf-8'), self.__password_hash):
-                print("\n[+] Autenticación exitosa. Acceso concedido a EcoTech Solutions.")
-                return True
-        print("\n[-] Error: Credenciales inválidas.")
+    def login(self, correo, password):
+        hash_intento = hashlib.sha256(password.encode()).hexdigest()
+        if self.__correo == correo and self.__password_hash == hash_intento:
+            return True
         return False
+
+class Empleado(Usuario):
+    def __init__(self, id_usuario, correo, password, nombre, rut, salario):
+        super().__init__(id_usuario, correo, password)
+        self.__nombre = nombre
+        self.__rut = rut
+        self.__salario = salario
+        self.__departamento = None
+        self.__registros = []
+
+    def asignar_departamento(self, departamento):
+        self.__departamento = departamento
+
+    def registrar_horas(self, fecha, horas, tarea):
+        nuevo_registro = RegistroTiempo(fecha, horas, tarea)
+        self.__registros.append(nuevo_registro)
+
+    def mostrar_info(self):
+        if self.__departamento != None:
+            depto_nombre = self.__departamento.get_nombre()
+        else:
+            depto_nombre = "Sin asignar"
+        print(f"Empleado: {self.__nombre} | RUT: {self.__rut} | Depto: {depto_nombre}")
+
+class Departamento:
+    def __init__(self, id_depto, nombre):
+        self.__id_depto = id_depto
+        self.__nombre = nombre
+
+    def get_nombre(self):
+        return self.__nombre
+
+class RegistroTiempo:
+    def __init__(self, fecha, horas, tarea):
+        self.__fecha = fecha
+        self.__horas = horas
+        self.__tarea = tarea
 
 class ServicioExterno:
     def __init__(self):
-        self.__base_url = "https://mindicador.cl/api"
+        self.__url_base = "https://mindicador.cl/api"
 
-    def __sanear_entrada(self, entrada):
-        """
-        Valida y sanea la entrada del usuario usando expresiones regulares.
-        Solo permite letras minúsculas (ej. 'uf', 'dolar', 'euro'). (3.1.2.I.6)
-        """
-        entrada_limpia = re.sub(r'[^a-z]', '', entrada.lower())
-        return entrada_limpia
+    def sanear_entrada(self, entrada):
+        permitidos = "abcdefghijklmnopqrstuvwxyz"
+        salida = ""
+        for letra in entrada.lower():
+            if letra in permitidos:
+                salida += letra
+        return salida
 
-    def obtener_tipo_cambio(self, indicador):
-        """
-        Realiza la solicitud HTTP GET y procesa la respuesta JSON. (3.1.1.I.1 y 3.1.1.I.2)
-        """
-        indicador_saneado = self.__sanear_entrada(indicador)
-        
-        if not indicador_saneado:
-            print("[-] Error: El indicador ingresado no es válido tras la sanitización.")
+    def obtener_indicador(self, tipo):
+        tipo_limpio = self.sanear_entrada(tipo)
+        if tipo_limpio == "":
             return None
-
-        url_completa = f"{self.__base_url}/{indicador_saneado}"
         
-        try:
-            # Solicitud HTTP funcional utilizando la librería requests
-            respuesta = requests.get(url_completa, timeout=5)
-            respuesta.raise_for_status() # Verifica si hay errores HTTP (404, 500, etc.)
-            
-            # Obtiene y procesa la respuesta en formato JSON
+        url = f"{self.__url_base}/{tipo_limpio}"
+        respuesta = requests.get(url)
+        
+        if respuesta.status_code == 200:
             datos = respuesta.json()
-            valor_actual = datos['serie'][0]['valor']
-            fecha = datos['serie'][0]['fecha'][:10]
-            
-            print(f"\n[+] Datos obtenidos de la API externa:")
-            print(f"    Indicador: {datos['nombre']}")
-            print(f"    Fecha: {fecha}")
-            print(f"    Valor: ${valor_actual} CLP")
-            return datos
-            
-        except requests.exceptions.HTTPError:
-            print(f"[-] Error: No se encontró el indicador '{indicador_saneado}'.")
-        except requests.exceptions.RequestException as e:
-            print(f"[-] Error de conexión con el servicio externo: {e}")
-        
+            valor = datos['serie'][0]['valor']
+            fecha = datos['serie'][0]['fecha'][0:10]
+            nombre = datos['nombre']
+            return valor, fecha, nombre
         return None
 
-# --- Flujo Principal de Ejecución ---
 def main():
-    print("=== Sistema de Gestión Interna EcoTech ===")
+    empleado_admin = Empleado("EMP01", "martin@ecotech.cl", "inacap123", "Martin Osorio", "19XXX", 850000)
+    depto_tecnologia = Departamento("D01", "Desarrollo TI")
+    empleado_admin.asignar_departamento(depto_tecnologia)
     
-    # 1. Creación de un usuario de prueba (Simulando la base de datos)
-    # Se aplica el encapsulamiento y cifrado automático definido en tu informe
-    admin = Usuario(id_usuario="USR-001", correo="admin@ecotech.cl", password_plana="Segura123!")
+    autenticado = False
     
-    # 2. Proceso de Login Seguro
-    print("\n--- Inicio de Sesión ---")
-    correo_input = input("Ingrese correo corporativo: ")
-    password_input = input("Ingrese contraseña: ")
-    
-    # Solo si el login es exitoso, se permite el acceso a las funciones externas
-    if admin.login(correo_input, password_input):
-        servicio = ServicioExterno()
+    while True:
+        print("\n--- SISTEMA ECOTECH SOLUTIONS ---")
+        print("1. Iniciar Sesion")
+        print("2. Salir")
+        opcion = input("Seleccione opcion: ")
         
-        print("\n--- Consulta de Servicios Externos (Tipo de Cambio) ---")
-        print("Opciones válidas: uf, dolar, euro, utm")
-        # Entrada directa del usuario que será validada y saneada
-        indicador_usuario = input("Ingrese el indicador económico a consultar: ")
+        if opcion == "1":
+            correo = input("Ingrese su correo: ")
+            password = input("Ingrese su password: ")
+            
+            if empleado_admin.login(correo, password):
+                autenticado = True
+                print("\nAcceso concedido.")
+                break
+            else:
+                print("\nCredenciales incorrectas.")
+        elif opcion == "2":
+            return
+        else:
+            print("\nOpcion no valida.")
+
+    while autenticado:
+        print("\n--- MENU PRINCIPAL ECOTECH ---")
+        print("1. Ver informacion de empleado")
+        print("2. Registrar horas de trabajo en proyecto")
+        print("3. Consultar indicador economico (API Externa)")
+        print("4. Cerrar Sesion")
         
-        servicio.obtener_tipo_cambio(indicador_usuario)
+        opcion_menu = input("Seleccione opcion: ")
+        
+        if opcion_menu == "1":
+            empleado_admin.mostrar_info()
+        
+        elif opcion_menu == "2":
+            fecha = input("Ingrese fecha (DD-MM-YYYY): ")
+            horas = float(input("Ingrese cantidad de horas: "))
+            tarea = input("Descripcion de la tarea: ")
+            empleado_admin.registrar_horas(fecha, horas, tarea)
+            print("Horas registradas mediante objetos. Problema de Excel solucionado.")
+        
+        elif opcion_menu == "3":
+            api = ServicioExterno()
+            indicador = input("Ingrese indicador (ejemplo: uf, dolar, euro): ")
+            resultado = api.obtener_indicador(indicador)
+            
+            if resultado != None:
+                valor, fecha, nombre = resultado
+                print(f"\nDatos obtenidos de {nombre}:")
+                print(f"Fecha: {fecha}")
+                print(f"Valor: ${valor}")
+            else:
+                print("\nError al obtener el indicador. Verifique el nombre.")
+                
+        elif opcion_menu == "4":
+            print("Cerrando sesion...")
+            autenticado = False
+        else:
+            print("Opcion incorrecta.")
 
 if __name__ == "__main__":
-    main()git add .
+    main()
